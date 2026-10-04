@@ -1,0 +1,7 @@
+{
+  "name": "better-recap",
+  "version": "0.1.0",
+  "author": { "name": "Marc Stevenson" },
+  "description": "A structured /recap, and a recap header with the session name, model and context use",
+  "types": "./types/index.d.ts"
+}
