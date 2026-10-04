@@ -34,6 +34,14 @@ describe('helpers', () => {
     expect(parseHeader('just a recap')).toBe(null)
   })
 
+  test('the branch closes the header and parses back; a header without one still parses', () => {
+    const line = formatHeader({ title: 'T', model: 'Opus 5.5', percent: 5, tokens: 50_000, window: 1_000_000, branch: 'main' })
+    expect(line).toBe('◆ T · Opus 5.5 · 5% context (50k/1M) · branch main')
+    expect(parseHeader(line)?.branch).toBe('main')
+    expect(parseHeader(line)?.context).toBe('5% context (50k/1M)')
+    expect(parseHeader('◆ T · Opus 5.5 · 5% context (50k/1M)')?.branch).toBe(undefined)
+  })
+
   test('a /rename beats the generated title', () => {
     const jsonl = [
       '{"type":"ai-title","aiTitle":"Generated","sessionId":"s"}',
@@ -56,12 +64,13 @@ test('the /recap row draws as a card with a context bar', async $ => {
         command: 'recap',
         args: '',
         isErrored: false,
-        text: '◆ Recap mod · Opus 5.5 · 62% context (124k/200k)\n\n**Goal:** ship it',
+        text: '◆ Recap mod · Opus 5.5 · 62% context (124k/200k) · branch feature/x\n\n**Goal:** ship it',
       },
     })
     expect((await ui.find({ type: 'Text', text: 'Recap mod' }))?.props.bold).toBe(true)
     expect((await ui.find({ type: 'Text', text: '██████░░░░' }))?.props.color).toBe('yellow')
     expect(await ui.find({ type: 'Markdown', text: /Goal/ })).toBeDefined()
+    expect((await ui.find({ type: 'Text', text: 'feature/x' }))?.props.color).toBe('cyan')
     await ui.unmount()
   }
 })
@@ -70,6 +79,9 @@ test('the away recap line gains the session facts', async ($, on) => {
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('session.usage', () => ({ value: USAGE }))
   on('classic.SessionStart', () => ({}))
+  on('process.run', () => ({
+    value: { exitCode: 0, stdout: 'main\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+  }))
   // The kit has no store beneath session.append: capture the row the plugin hands down.
   let handedDown: unknown
   on('session.append', ($, e, next) => {
@@ -86,7 +98,7 @@ test('the away recap line gains the session facts', async ($, on) => {
   }).catch(() => undefined)
   expect(handedDown).toEqual({
     type: 'text',
-    text: '[Recap mod · Opus 5.5 · 62% context (124k/200k)] Built the mod.',
+    text: '[Recap mod · Opus 5.5 · 62% context (124k/200k) · branch main] Built the mod.',
   })
 })
 

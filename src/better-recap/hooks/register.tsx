@@ -10,6 +10,7 @@ const session = atom({ plugin: 'better-recap', key: 'session' } as const, {
 
 const MARK = '◆ '
 const SEP = ' · '
+const BRANCH = 'branch '
 const BAR_CELLS = 10
 
 const RECAP_PROMPT = `Write a recap of this session for someone coming back to it after a break.
@@ -28,6 +29,7 @@ type Header = {
   percent: number | undefined
   tokens: number | undefined
   window: number
+  branch?: string | null
 }
 
 // 'claude-opus-5-5[1m]' -> 'Opus 5.5 (1M)'; anything already readable is kept.
@@ -53,18 +55,25 @@ export function formatHeader(h: Header): string {
     h.percent === undefined
       ? 'context n/a'
       : `${h.percent}% context (${shortTokens(h.tokens ?? 0)}/${shortTokens(h.window)})`
-  return MARK + [h.title, h.model, context].join(SEP)
+  const parts = [h.title, h.model, context]
+  if (h.branch) parts.push(BRANCH + h.branch)
+  return MARK + parts.join(SEP)
 }
 
 // The inverse of formatHeader, splitting from the right so a title holding ' · ' survives.
-export function parseHeader(line: string): { title: string; model: string; context: string; percent?: number } | null {
+// The branch is optional: headers written outside a repo, or before it was added, have none.
+export function parseHeader(
+  line: string,
+): { title: string; model: string; context: string; percent?: number; branch?: string } | null {
   if (!line.startsWith(MARK)) return null
   const parts = line.slice(MARK.length).split(SEP)
+  const last = parts[parts.length - 1] ?? ''
+  const branch = last.startsWith(BRANCH) ? parts.pop()!.slice(BRANCH.length) : undefined
   if (parts.length < 3) return null
   const context = parts.pop()!
   const model = parts.pop()!
   const pct = /^(\d+)% context/.exec(context)
-  return { title: parts.join(SEP), model, context, percent: pct ? Number(pct[1]) : undefined }
+  return { title: parts.join(SEP), model, context, percent: pct ? Number(pct[1]) : undefined, branch }
 }
 
 // The newest /rename (custom-title) wins over the generated ai-title.
@@ -96,11 +105,25 @@ async function sessionTitle($: EngineInterface): Promise<string> {
   return known.title ?? 'Untitled session'
 }
 
+// The checked-out branch, the short commit when HEAD is detached, null outside a repo.
+async function currentBranch($: EngineInterface): Promise<string | null> {
+  try {
+    const branch = await $.process.run(['git', 'branch', '--show-current'])
+    if (branch.exitCode !== 0) return null
+    if (branch.stdout.trim() !== '') return branch.stdout.trim()
+    const head = await $.process.run(['git', 'rev-parse', '--short', 'HEAD'])
+    return head.exitCode === 0 ? `detached@${head.stdout.trim()}` : null
+  } catch {
+    return null
+  }
+}
+
 async function header($: EngineInterface): Promise<string> {
-  const [title, model, usage] = await Promise.all([
+  const [title, model, usage, branch] = await Promise.all([
     sessionTitle($),
     $.session.model(),
     $.session.usage(),
+    currentBranch($),
   ])
   return formatHeader({
     title,
@@ -108,6 +131,7 @@ async function header($: EngineInterface): Promise<string> {
     percent: usage.context.percent,
     tokens: usage.context.tokens,
     window: usage.context.window,
+    branch,
   })
 }
 
@@ -182,6 +206,9 @@ export const register: Register = on => {
             </Text>
           )}
           <Text dimColor>{top.context}</Text>
+          {top.branch !== undefined && <Text dimColor>·</Text>}
+          {top.branch !== undefined && <Text dimColor>branch</Text>}
+          {top.branch !== undefined && <Text color="cyan">{top.branch}</Text>}
         </Box>
         {body !== '' && (
           <Box marginTop={1}>
